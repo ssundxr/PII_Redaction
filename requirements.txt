@@ -1,0 +1,6 @@
+torch
+transformers
+ultralytics
+pillow
+opencv-python
+pytesseract
