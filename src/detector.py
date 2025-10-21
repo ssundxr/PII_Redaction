@@ -4,6 +4,7 @@ import logging
 from PIL import Image
 import numpy as np
 from ultralytics import YOLO
+import torch
 
 PII_PATTERNS = {
     "EMAIL": re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"),
@@ -51,14 +52,14 @@ class VisualPIIDetector:
     # Default PII-sensitive classes (primarily person detection)
     DEFAULT_PII_CLASSES = [0]  # person class
     
-    def __init__(self, model_path: str = "yolov8n.pt", confidence_threshold: float = 0.5):
+    def __init__(self, model_path: str = "yolov8n.pt", confidence_threshold: float = 0.25):
         """
         Initialize the VisualPIIDetector with YOLOv8 model.
         
         Args:
             model_path (str): Path to the YOLOv8 model file. Defaults to "yolov8n.pt".
             confidence_threshold (float): Minimum confidence threshold for detections.
-                                        Defaults to 0.5.
+                                        Defaults to 0.25.
         
         Raises:
             Exception: If the YOLOv8 model fails to load.
@@ -70,7 +71,13 @@ class VisualPIIDetector:
         try:
             self.logger.info(f"Loading YOLOv8 model: {model_path}")
             self.model = YOLO(model_path)
-            self.logger.info("YOLOv8 model loaded successfully")
+            
+            # Move to GPU and use half precision if available
+            self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+            if self.device.type == 'cuda':
+                self.model = self.model.to(self.device).half()
+                
+            self.logger.info(f"YOLOv8 model loaded on {self.device} with half precision")
             
         except Exception as e:
             self.logger.error(f"Failed to load YOLOv8 model {model_path}: {str(e)}")
@@ -98,8 +105,17 @@ class VisualPIIDetector:
         try:
             self.logger.info("Starting visual PII detection")
             
-            # Run YOLOv8 inference
-            results = self.model(image, verbose=False)
+            # Convert image to numpy array for YOLO
+            img_array = np.array(image)
+            
+            # Run YOLOv8 inference with optimized settings
+            results = self.model(
+                img_array,
+                conf=self.confidence_threshold,
+                device=self.device,
+                verbose=False,
+                agnostic_nms=True  # Better for person detection
+            )
             
             detections = []
             

@@ -1,10 +1,16 @@
 from typing import List, Tuple
-from PIL import Image
+from PIL import Image, ImageEnhance, ImageFilter
 import pytesseract
 import logging
 from transformers import TrOCRProcessor, VisionEncoderDecoderModel
 import torch
 import os
+import warnings
+
+# Suppress TrOCR warnings
+os.environ["TRANSFORMERS_VERBOSITY"] = "error"
+warnings.filterwarnings("ignore", message=".*early_stopping.*")
+
 
 # Configure Tesseract path for Windows (uncomment if needed)
 pytesseract.pytesseract.tesseract_cmd = r'C:\Users\sdshy\AppData\Local\Programs\Tesseract-OCR\tesseract.exe'
@@ -39,13 +45,13 @@ class TrOCRExtractor:
     text recognition accuracy.
     """
     
-    def __init__(self, model_name: str = "microsoft/trocr-base-printed"):
+    def __init__(self, model_name: str = "microsoft/trocr-base-handwritten"):
         """
         Initialize the TrOCRExtractor with the specified TrOCR model.
         
         Args:
             model_name (str): The name of the TrOCR model to use.
-                            Defaults to "microsoft/trocr-base-printed".
+                            Defaults to "microsoft/trocr-base-handwritten".
         
         Raises:
             Exception: If the model fails to load.
@@ -55,7 +61,7 @@ class TrOCRExtractor:
         
         try:
             self.logger.info(f"Loading TrOCR model: {model_name}")
-            self.processor = TrOCRProcessor.from_pretrained(model_name)
+            self.processor = TrOCRProcessor.from_pretrained(model_name, use_fast=True)
             self.model = VisionEncoderDecoderModel.from_pretrained(model_name)
             
             # Set device (GPU if available, otherwise CPU)
@@ -67,7 +73,7 @@ class TrOCRExtractor:
             self.logger.error(f"Failed to load TrOCR model {model_name}: {str(e)}")
             raise Exception(f"Failed to initialize TrOCRExtractor: {str(e)}")
     
-    def extract_text_lines(self, image: Image.Image) -> List[Tuple[str, Tuple[int, int, int, int]]]:
+    def extract_text_lines(self, image: Image.Image, beams: int = 1) -> List[Tuple[str, Tuple[int, int, int, int]]]:
         """
         Extract text from an image by detecting text lines and applying TrOCR to each line.
         
@@ -76,6 +82,7 @@ class TrOCRExtractor:
         
         Args:
             image (PIL.Image.Image): The input image to extract text from.
+            beams (int): Number of beams for TrOCR generation (default 1 for speed).
         
         Returns:
             List[Tuple[str, Tuple[int, int, int, int]]]: A list of tuples containing
@@ -100,22 +107,47 @@ class TrOCRExtractor:
             
             results = []
             
+            if not lines:
+                return results
+            
+            # Prepare line images for batch processing
+            line_images = []
+            valid_boxes = []
+            
             for line_bbox in lines:
                 try:
                     # Crop the line from the original image
                     x, y, w, h = line_bbox
                     line_image = image.crop((x, y, x + w, y + h))
                     
-                    # Apply TrOCR to the cropped line
-                    text = self._extract_text_with_trocr(line_image)
+                    # Preprocess the line image: grayscale, contrast, smooth, and conditionally scale
+                    line_image = line_image.convert('L')
+                    enhancer = ImageEnhance.Contrast(line_image)
+                    line_image = enhancer.enhance(1.5)
+                    line_image = line_image.filter(ImageFilter.SMOOTH)
+                    if line_image.width < 100 or line_image.height < 100:
+                        # Scale by 2x
+                        new_size = (line_image.width * 2, line_image.height * 2)
+                        line_image = line_image.resize(new_size, Image.BICUBIC)
+                    line_image = line_image.convert('RGB')
                     
-                    if text.strip():  # Only add non-empty text
-                        results.append((text.strip(), line_bbox))
-                        self.logger.debug(f"Extracted text: '{text.strip()}' at bbox: {line_bbox}")
+                    line_images.append(line_image)
+                    valid_boxes.append(line_bbox)
                 
                 except Exception as e:
                     self.logger.warning(f"Failed to process line at {line_bbox}: {str(e)}")
                     continue
+            
+            # Process all lines in batches
+            batch_size = 8
+            for i in range(0, len(line_images), batch_size):
+                batch = line_images[i:i+batch_size]
+                batch_texts = self._extract_text_with_trocr(batch, beams)
+                
+                for text, bbox in zip(batch_texts, valid_boxes[i:i+batch_size]):
+                    if text.strip():  # Only add non-empty text
+                        results.append((text.strip(), bbox))
+                        self.logger.debug(f"Extracted text: '{text.strip()}' at bbox: {bbox}")
             
             self.logger.info(f"Successfully extracted {len(results)} text lines")
             return results
@@ -198,32 +230,45 @@ class TrOCRExtractor:
         
         return (min_x, min_y, max_x - min_x, max_y - min_y)
     
-    def _extract_text_with_trocr(self, image: Image.Image) -> str:
+    def _extract_text_with_trocr(self, images: List[Image.Image], beams: int = 1) -> List[str]:
         """
-        Extract text from an image using TrOCR.
+        Extract text from a batch of images using TrOCR.
         
         Args:
-            image (PIL.Image.Image): The input image to extract text from.
+            images: List of PIL Image objects to process
+            beams: Number of beams for generation (1 for speed, 2+ for accuracy)
         
         Returns:
-            str: The extracted text.
-        
-        Raises:
-            Exception: If TrOCR text extraction fails.
+            List of extracted text strings
         """
         try:
-            # Preprocess the image
-            pixel_values = self.processor(image, return_tensors="pt").pixel_values.to(self.device)
+            # Preprocess all images
+            pixel_values = self.processor(images, return_tensors="pt").pixel_values.to(self.device)
             
-            # Generate text
+            # Generate text with batch processing
             with torch.no_grad():
-                generated_ids = self.model.generate(pixel_values)
+                generated_ids = self.model.generate(
+                    pixel_values,
+                    num_beams=beams,
+                    max_new_tokens=64,
+                    do_sample=False,
+                    eos_token_id=self.processor.tokenizer.eos_token_id
+                )
             
-            # Decode the generated text
-            generated_text = self.processor.batch_decode(generated_ids, skip_special_tokens=True)[0]
-            
-            return generated_text
+            # Decode all generated texts
+            generated_texts = self.processor.batch_decode(generated_ids, skip_special_tokens=True)
+            return generated_texts
             
         except Exception as e:
-            self.logger.error(f"TrOCR text extraction failed: {str(e)}")
-            raise Exception(f"Failed to extract text with TrOCR: {str(e)}")
+            self.logger.error(f"Batch text extraction failed: {str(e)}")
+            return [""] * len(images)
+
+
+# Test function (optional)
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
+    try:
+        extractor = TrOCRExtractor()
+        print("TrOCRExtractor initialized successfully")
+    except Exception as e:
+        print(f"Error: {e}")

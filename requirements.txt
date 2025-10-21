@@ -1,6 +1,15 @@
-torch
-transformers
-ultralytics
-pillow
-opencv-python
-pytesseract
+torch>=2.0.0
+torchvision>=0.15.0
+transformers>=4.30.0
+ultralytics>=8.0.0
+pillow>=10.0.0
+opencv-python>=4.8.0
+pytesseract>=0.3.10
+numpy>=1.24.0
+fuzzywuzzy>=0.18.0  # For PII fuzzy matching
+flower==2.0.1
+opacus==1.4.0
+shap==0.49.1
+cryptography==42.0.8
+pdf2image==1.17.0
+spacy>=3.7.0
