@@ -1,8 +1,9 @@
 """
-PII Redactor MVP - Graphical User Interface
-Company: Blackbox & Co
-Features: Threaded processing, audit logging, explanations, watermarked redaction
+Privara PII Redactor - Premium Enterprise UI
+Professional interface with modern design and smooth animations
+Version: 3.0 Enterprise - Premium Edition
 """
+
 
 import os
 import sys
@@ -10,657 +11,874 @@ import json
 import threading
 from pathlib import Path
 from queue import Queue
-
 import tkinter as tk
-from tkinter import filedialog, messagebox, ttk
-from PIL import Image, ImageTk
+from tkinter import filedialog, messagebox, ttk, scrolledtext
+from PIL import Image, ImageTk, ImageDraw, ImageFilter
+import logging
 
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+
+# Modern Color Palette - Premium Design
+COLORS = {
+    # Primary Colors
+    'primary': '#6366f1',  # Indigo
+    'primary_dark': '#4f46e5',
+    'primary_light': '#818cf8',
+    
+    # Accent Colors
+    'accent': '#8b5cf6',  # Purple
+    'success': '#10b981',  # Green
+    'warning': '#f59e0b',  # Amber
+    'error': '#ef4444',  # Red
+    'info': '#3b82f6',  # Blue
+    
+    # Neutral Colors
+    'bg_primary': '#0f172a',  # Dark slate
+    'bg_secondary': '#1e293b',
+    'bg_tertiary': '#334155',
+    'surface': '#1e293b',
+    'surface_light': '#334155',
+    
+    # Text Colors
+    'text_primary': '#f1f5f9',
+    'text_secondary': '#cbd5e1',
+    'text_muted': '#94a3b8',
+    
+    # Border Colors
+    'border': '#334155',
+    'border_light': '#475569',
+    
+    # Gradient Colors
+    'gradient_start': '#6366f1',
+    'gradient_end': '#8b5cf6',
+}
+
+
+# Add project to path
 CURRENT_DIR = Path(__file__).resolve().parent
-PROJECT_ROOT = CURRENT_DIR.parent
+sys.path.insert(0, str(CURRENT_DIR))
 
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
-if str(CURRENT_DIR) not in sys.path:
-    sys.path.insert(0, str(CURRENT_DIR))
 
+# Import redactor
 try:
-    from src.ocr import TrOCRExtractor
-    from src.detector import VisualPIIDetector
-    from src.redactor import PIIRedactor
-    REDACTOR_AVAILABLE = True
-except ImportError:
-    try:
-        from ocr import TrOCRExtractor
-        from detector import VisualPIIDetector
-        from redactor import PIIRedactor
-        REDACTOR_AVAILABLE = True
-    except ImportError as e:
-        print(f"Warning: Could not import PIIRedactor: {e}")
-        PIIRedactor = None
-        REDACTOR_AVAILABLE = False
+    from redactor import get_enhanced_redactor
+    REDACTOR = get_enhanced_redactor()
+    logger.info("✓ Enhanced redactor initialized")
+except ImportError as e:
+    logger.error(f"Failed to import redactor: {e}")
+    from redactor import PIIRedactor
+    REDACTOR = PIIRedactor()
+    logger.info("✓ Basic redactor initialized")
+
+# Import PDF redactor
+try:
+    from pdf_redactor import PDFRedactor
+    PDF_REDACTOR = PDFRedactor()
+    PDF_AVAILABLE = True
+    logger.info("✓ PDF redactor initialized")
+except Exception as e:
+    PDF_REDACTOR = None
+    PDF_AVAILABLE = False
+    logger.warning(f"PDF redactor unavailable: {e}")
 
 
-class PIIRedactorGUI:
-    def __init__(self, root):
-        self.root = root
-        self.root.title("PII Redactor MVP - Shyam & Co")
-        self.root.geometry("900x700")
-        self.root.resizable(False, False)
+
+class ModernButton(tk.Canvas):
+    """Custom modern button with hover effects and animations."""
+    
+    def __init__(self, parent, text, command=None, bg=COLORS['primary'], 
+                 fg=COLORS['text_primary'], width=200, height=48, icon=None, **kwargs):
+        super().__init__(parent, width=width, height=height, 
+                        bg=COLORS['bg_secondary'], highlightthickness=0, **kwargs)
         
-        # Initialize variables first
-        self.current_image_path = None
-        self.original_image = None  # Store original full-resolution image
+        self.text = text
+        self.command = command
+        self.bg_color = bg
+        self.fg_color = fg
+        self.width = width
+        self.height = height
+        self.icon = icon
+        self.is_hovered = False
+        self.is_disabled = False
+        
+        self.draw_button()
+        self.bind('<Enter>', self.on_enter)
+        self.bind('<Leave>', self.on_leave)
+        self.bind('<Button-1>', self.on_click)
+    
+    def draw_button(self):
+        """Draw the button with rounded corners."""
+        self.delete('all')
+        
+        # Determine color based on state
+        if self.is_disabled:
+            bg = COLORS['surface']
+            fg = COLORS['text_muted']
+        elif self.is_hovered:
+            bg = self.bg_color
+            fg = self.fg_color
+        else:
+            # Slightly darker when not hovered
+            bg = self.bg_color
+            fg = self.fg_color
+        
+        # Draw rounded rectangle
+        self.create_rounded_rectangle(2, 2, self.width-2, self.height-2, 
+                                     radius=8, fill=bg, outline='')
+        
+        # Draw text
+        text_y = self.height // 2
+        if self.icon:
+            # Draw icon + text
+            self.create_text(self.width // 2 - 30, text_y, text=self.icon, 
+                           fill=fg, font=('Segoe UI', 14))
+            self.create_text(self.width // 2 + 10, text_y, text=self.text,
+                           fill=fg, font=('Segoe UI', 11, 'bold'))
+        else:
+            self.create_text(self.width // 2, text_y, text=self.text,
+                           fill=fg, font=('Segoe UI', 11, 'bold'))
+    
+    def create_rounded_rectangle(self, x1, y1, x2, y2, radius=10, **kwargs):
+        """Create a rounded rectangle."""
+        points = [
+            x1+radius, y1,
+            x1+radius, y1,
+            x2-radius, y1,
+            x2-radius, y1,
+            x2, y1,
+            x2, y1+radius,
+            x2, y1+radius,
+            x2, y2-radius,
+            x2, y2-radius,
+            x2, y2,
+            x2-radius, y2,
+            x2-radius, y2,
+            x1+radius, y2,
+            x1+radius, y2,
+            x1, y2,
+            x1, y2-radius,
+            x1, y2-radius,
+            x1, y1+radius,
+            x1, y1+radius,
+            x1, y1
+        ]
+        return self.create_polygon(points, smooth=True, **kwargs)
+    
+    def on_enter(self, event):
+        """Handle mouse enter."""
+        if not self.is_disabled:
+            self.is_hovered = True
+            self.draw_button()
+            self.config(cursor='hand2')
+    
+    def on_leave(self, event):
+        """Handle mouse leave."""
+        self.is_hovered = False
+        self.draw_button()
+        self.config(cursor='')
+    
+    def on_click(self, event):
+        """Handle button click."""
+        if not self.is_disabled and self.command:
+            self.command()
+    
+    def set_state(self, state):
+        """Set button state (normal/disabled)."""
+        self.is_disabled = (state == 'disabled')
+        self.draw_button()
+
+
+class ModernCard(tk.Frame):
+    """Modern card component with shadow effect."""
+    
+    def __init__(self, parent, **kwargs):
+        super().__init__(parent, bg=COLORS['surface'], **kwargs)
+        self.config(relief=tk.FLAT, borderwidth=0)
+
+
+class PIIRedactorUI(tk.Tk):
+    """
+    Professional UI for PII Redactor.
+    
+    Features:
+    - Image preview
+    - Real-time processing
+    - Audit log viewer
+    - NLP explanations
+    - Risk assessment
+    - Batch processing
+    """
+    
+    def __init__(self):
+        super().__init__()
+        
+        self.title("PII Redactor - Enterprise Edition v3.0 (PDF Support)")
+        self.geometry("1400x900")
+        self.configure(bg='#f0f0f0')
+        
+        # State variables
+        self.current_image = None
         self.redacted_image = None
-        self.audit_log = []  # List to store audit trail messages
-        self.settings_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "settings.json")
-        self.pii_redactor = None  # Initialize as None first
-        self.pii_redactor_ready = False
+        self.audit_data = None
+        self.processing = False
+        self.current_pdf_path = None  # For PDF processing
+        self.is_pdf_mode = False  # Track if processing PDF
         
-        # Threading for background operations
-        self.result_queue = Queue()
-        self.processing_thread = None
-        self.current_audit_data = None  # Store latest audit data for explanations
+        # Setup UI
+        self._setup_ui()
         
-        # Create blank image for initial display
-        self.blank_image = Image.new('RGB', (400, 400), (240, 240, 240))
-        self.blank_photo = ImageTk.PhotoImage(self.blank_image)
-        
-        # Load settings
-        self.load_settings()
-        
-        # Create UI elements FIRST (this creates status_var)
-        self.create_widgets()
-        
-        # Update status bar initially
-        self.update_status("Initializing PII Redactor...")
-        
-        # Initialize PIIRedactor after GUI is created
-        self.root.after(100, self.start_pii_redactor_initialization)
-        
-        # Start checking for results
-        self.check_background_results()
+        logger.info("UI initialized")
     
-    def start_pii_redactor_initialization(self):
-        """Start PIIRedactor initialization in background thread."""
-        if not REDACTOR_AVAILABLE or PIIRedactor is None:
-            self.update_status("PII Redactor modules not available - Basic image viewing only")
-            messagebox.showwarning(
-                "Limited Functionality", 
-                "PII detection modules are not available.\n\n"
-                "You can still upload and view images, but PII redaction will not work.\n\n"
-                "Please ensure all dependencies are installed:\n"
-                "- transformers\n- ultralytics\n- torch\n- pytesseract"
-            )
-            if hasattr(self, 'redact_btn'):
-                self.redact_btn.config(state=tk.DISABLED)
-            return
+    def _setup_ui(self):
+        """Setup main UI layout."""
+        # Menu bar
+        menubar = tk.Menu(self)
+        self.config(menu=menubar)
         
-        self.update_status("Loading AI models in background... This may take a few moments.")
-        
-        # Start initialization in background thread
-        init_thread = threading.Thread(target=self.initialize_pii_redactor_background, daemon=True)
-        init_thread.start()
-    
-    def initialize_pii_redactor_background(self):
-        """Initialize PIIRedactor in background thread."""
-        try:
-            # This runs in background thread
-            pii_redactor = PIIRedactor()
-            self.result_queue.put(("init_success", pii_redactor))
-        except Exception as e:
-            self.result_queue.put(("init_error", str(e)))
-    
-    def check_background_results(self):
-        """Check for results from background operations."""
-        try:
-            while not self.result_queue.empty():
-                result_type, result_data = self.result_queue.get_nowait()
-                
-                if result_type == "init_success":
-                    self.pii_redactor = result_data
-                    self.pii_redactor_ready = True
-                    self.update_status("✓ PII Redactor ready - Upload a document to begin")
-                    
-                elif result_type == "init_error":
-                    error_msg = result_data
-                    self.update_status("⚠ Failed to initialize PII Redactor - Image viewing available")
-                    messagebox.showwarning(
-                        "Initialization Warning", 
-                        f"PII Redactor could not be fully initialized:\n\n{error_msg}\n\n"
-                        "You can still upload and view images, but PII detection will not be available.\n\n"
-                        "Common issues:\n"
-                        "- Missing model files\n- Insufficient memory\n- Missing dependencies\n\n"
-                        "Try restarting the application or check the console for details."
-                    )
-                    self.pii_redactor = None
-                    if hasattr(self, 'redact_btn'):
-                        self.redact_btn.config(state=tk.DISABLED)
-                
-                elif result_type == "redaction_success":
-                    redacted_image, audit_data = result_data
-                    self.redacted_image = redacted_image
-                    self.current_audit_data = audit_data  # Store for explanations
-                    self.process_audit_data(audit_data)
-                    self.display_redacted_image()
-                    self.save_btn.config(state=tk.NORMAL)
-                    self.explain_btn.config(state=tk.NORMAL)  # Enable explanation button
-                    self.update_status("✓ PII redaction completed successfully")
-                    self.redact_btn.config(state=tk.NORMAL)
-                    self.progress.stop()
-                    self.progress.grid_remove()
-                    
-                elif result_type == "redaction_error":
-                    error_msg = result_data
-                    messagebox.showerror("Error", f"Failed to redact PII:\n\n{error_msg}")
-                    self.update_status("✗ Error in PII redaction")
-                    self.redact_btn.config(state=tk.NORMAL)
-                    self.progress.stop()
-                    self.progress.grid_remove()
-                    
-        except:
-            pass  # Queue is empty
-        
-        # Schedule next check
-        self.root.after(100, self.check_background_results)
-    
-    def process_audit_data(self, audit_data):
-        """Process audit data from background redaction."""
-        if audit_data:
-            text_pii = audit_data.get('text_pii_count', 0)
-            visual_pii = audit_data.get('visual_pii_count', 0)
-            total_pii = audit_data.get('total_pii_detected', text_pii + visual_pii)
-            pii_types = audit_data.get('detected_pii_types', [])
-            
-            audit_message = f"✓ Document processed: {total_pii} PII detections found"
-            if text_pii > 0:
-                audit_message += f" (Text: {text_pii}"
-            if visual_pii > 0:
-                audit_message += f", Visual: {visual_pii}"
-            if text_pii > 0 or visual_pii > 0:
-                audit_message += ")"
-            if pii_types:
-                audit_message += f"\n  Types detected: {', '.join(pii_types)}"
-            
-            self.audit_log.append(audit_message)
-    
-    def create_widgets(self):
-        # Main frame
-        main_frame = ttk.Frame(self.root, padding="10")
-        main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
-        
-        # Configure grid weights for resizing
-        self.root.columnconfigure(0, weight=1)
-        self.root.rowconfigure(0, weight=1)
-        self.root.rowconfigure(1, weight=0)  # Status bar row
-        main_frame.columnconfigure(1, weight=1)
-        main_frame.rowconfigure(2, weight=1)  # Make preview area expandable
-        
-        # Title label
-        title_label = ttk.Label(main_frame, text="PII Redactor MVP", font=("Arial", 18, "bold"))
-        title_label.grid(row=0, column=0, columnspan=2, pady=10)
-        
-        company_label = ttk.Label(main_frame, text="Powered by Shyam & Co", font=("Arial", 10, "italic"), foreground="gray")
-        company_label.grid(row=0, column=0, columnspan=2, pady=(35, 0))
-        
-        # Button frame for better layout
-        button_frame = ttk.Frame(main_frame)
-        button_frame.grid(row=1, column=0, columnspan=2, pady=10, sticky=(tk.W, tk.E))
-        button_frame.columnconfigure(0, weight=1)
-        button_frame.columnconfigure(1, weight=1)
-        
-        # Upload button
-        upload_btn = ttk.Button(button_frame, text="📁 Upload Document", command=self.upload_document, padding=10)
-        upload_btn.grid(row=0, column=0, padx=5, sticky=(tk.W, tk.E))
-        self.create_tooltip(upload_btn, "Upload a document to redact PII")
-        
-        # Redact button
-        self.redact_btn = ttk.Button(button_frame, text="🔒 Redact PII", command=self.redact_pii, state=tk.DISABLED, padding=10)
-        self.redact_btn.grid(row=0, column=1, padx=5, sticky=(tk.W, tk.E))
-        self.create_tooltip(self.redact_btn, "Redact PII from the uploaded document")
-        
-        # Image preview area (500x400)
-        preview_frame = ttk.LabelFrame(main_frame, text="Document Preview", padding=10)
-        preview_frame.grid(row=2, column=0, columnspan=2, pady=10, sticky=(tk.W, tk.E, tk.N, tk.S))
-        
-        self.preview_label = ttk.Label(
-            preview_frame, 
-            image=self.blank_photo,
-            background="lightgray"
-        )
-        self.preview_label.pack(expand=True)
-        self.preview_label.image = self.blank_photo  # Keep reference
-        
-        # Action buttons frame
-        action_frame = ttk.Frame(main_frame)
-        action_frame.grid(row=3, column=0, columnspan=2, pady=10, sticky=(tk.W, tk.E))
-        action_frame.columnconfigure(0, weight=1)
-        action_frame.columnconfigure(1, weight=1)
-        action_frame.columnconfigure(2, weight=1)
-        
-        # Save button
-        self.save_btn = ttk.Button(action_frame, text="💾 Save Redacted", command=self.save_redacted, state=tk.DISABLED, padding=8)
-        self.save_btn.grid(row=0, column=0, padx=5, sticky=(tk.W, tk.E))
-        self.create_tooltip(self.save_btn, "Save the redacted document")
-        
-        # View Explanation button
-        self.explain_btn = ttk.Button(action_frame, text="📋 View Explanations", command=self.view_explanations, state=tk.DISABLED, padding=8)
-        self.explain_btn.grid(row=0, column=1, padx=5, sticky=(tk.W, tk.E))
-        self.create_tooltip(self.explain_btn, "View detailed explanations for detected PII")
-        
-        # View Log button  
-        log_btn = ttk.Button(action_frame, text="📜 View Audit Log", command=self.view_log, padding=8)
-        log_btn.grid(row=0, column=2, padx=5, sticky=(tk.W, tk.E))
-        self.create_tooltip(log_btn, "View the audit trail")
-        
-        # Progress bar
-        self.progress = ttk.Progressbar(main_frame, orient='horizontal', length=300, mode='indeterminate')
-        self.progress.grid(row=4, column=0, columnspan=2, padx=10, pady=10)
-        self.progress.grid_remove()  # Hide progress bar initially
-        
-        # Status bar
-        self.status_var = tk.StringVar()
-        self.status_var.set("Ready")
-        self.status_bar = ttk.Label(self.root, textvariable=self.status_var, relief=tk.SUNKEN, anchor=tk.W, padding=5)
-        self.status_bar.grid(row=1, column=0, sticky=(tk.W, tk.E))
-        
-        # Create menu bar
-        menubar = tk.Menu(self.root)
-        self.root.config(menu=menubar)
-        
-        # File menu
         file_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="File", menu=file_menu)
-        file_menu.add_command(label="Open Document", command=self.upload_document, accelerator="Ctrl+O")
-        file_menu.add_command(label="Save Redacted", command=self.save_redacted, accelerator="Ctrl+S")
+        file_menu.add_command(label="Open Image", command=self.load_image)
+        file_menu.add_command(label="Open PDF", command=self.load_pdf)
         file_menu.add_separator()
-        file_menu.add_command(label="Clear Recent Files", command=self.clear_recent_files)
+        file_menu.add_command(label="Save Redacted", command=self.save_redacted)
         file_menu.add_separator()
-        file_menu.add_command(label="Exit", command=self.root.quit, accelerator="Alt+F4")
+        file_menu.add_command(label="Exit", command=self.quit)
         
-        # Recent files submenu
-        self.recent_files = []
-        self.recent_menu = tk.Menu(file_menu, tearoff=0)
-        file_menu.add_cascade(label="Open Recent", menu=self.recent_menu)
-        self.update_recent_menu()
+        tools_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="Tools", menu=tools_menu)
+        tools_menu.add_command(label="View Audit Logs", command=self.view_audit_logs)
+        tools_menu.add_command(label="Batch Process", command=self.batch_process)
         
-        # Help menu
-        help_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="Help", menu=help_menu)
-        help_menu.add_command(label="About", command=self.show_about)
-        help_menu.add_command(label="Documentation", command=self.show_documentation)
+        # Main container
+        main_frame = ttk.Frame(self, padding="10")
+        main_frame.grid(row=0, column=0, sticky="nsew")
+        self.grid_rowconfigure(0, weight=1)
+        self.grid_columnconfigure(0, weight=1)
+        
+        # Left panel - Controls
+        left_panel = ttk.Frame(main_frame, width=300)
+        left_panel.grid(row=0, column=0, sticky="ns", padx=(0, 10))
+        
+        # Logo/Title
+        title_label = ttk.Label(
+            left_panel,
+            text="PII REDACTOR",
+            font=("Helvetica", 24, "bold"),
+            foreground="#2c3e50"
+        )
+        title_label.pack(pady=(0, 5))
+        
+        subtitle_label = ttk.Label(
+            left_panel,
+            text="Multimodal PII Redaction",
+            font=("Helvetica", 10),
+            foreground="#7f8c8d"
+        )
+        subtitle_label.pack(pady=(0, 20))
+        
+        # Action buttons
+        btn_frame = ttk.Frame(left_panel)
+        btn_frame.pack(fill="x", pady=10)
+        
+        self.btn_load = ttk.Button(
+            btn_frame,
+            text="📁 Load Image",
+            command=self.load_image,
+            width=25
+        )
+        self.btn_load.pack(pady=5)
+        
+        self.btn_load_pdf = ttk.Button(
+            btn_frame,
+            text="📄 Load PDF",
+            command=self.load_pdf,
+            width=25
+        )
+        self.btn_load_pdf.pack(pady=5)
+        
+        self.btn_process = ttk.Button(
+            btn_frame,
+            text="🔒 Redact PII",
+            command=self.process_image,
+            state="disabled",
+            width=25
+        )
+        self.btn_process.pack(pady=5)
+        
+        self.btn_save = ttk.Button(
+            btn_frame,
+            text="💾 Save Result",
+            command=self.save_redacted,
+            state="disabled",
+            width=25
+        )
+        self.btn_save.pack(pady=5)
+        
+        # Progress bar
+        self.progress = ttk.Progressbar(
+            left_panel,
+            mode='indeterminate',
+            length=280
+        )
+        self.progress.pack(pady=10)
+        
+        # Status label
+        self.status_label = ttk.Label(
+            left_panel,
+            text="Ready",
+            font=("Helvetica", 9),
+            foreground="#27ae60"
+        )
+        self.status_label.pack(pady=5)
+        
+        # Statistics frame
+        stats_frame = ttk.LabelFrame(left_panel, text="Statistics", padding="10")
+        stats_frame.pack(fill="both", expand=True, pady=10)
+        
+        self.stats_text = scrolledtext.ScrolledText(
+            stats_frame,
+            height=10,
+            width=30,
+            font=("Courier", 9),
+            wrap=tk.WORD
+        )
+        self.stats_text.pack(fill="both", expand=True)
+        
+        # Middle panel - Image viewer
+        middle_panel = ttk.Frame(main_frame)
+        middle_panel.grid(row=0, column=1, sticky="nsew")
+        main_frame.grid_columnconfigure(1, weight=2)
+        
+        # Original image
+        orig_label = ttk.Label(middle_panel, text="Original", font=("Helvetica", 12, "bold"))
+        orig_label.grid(row=0, column=0, pady=5)
+        
+        self.original_canvas = tk.Canvas(
+            middle_panel,
+            width=400,
+            height=600,
+            bg='white',
+            relief=tk.SUNKEN,
+            borderwidth=2
+        )
+        self.original_canvas.grid(row=1, column=0, padx=5, sticky="nsew")
+        
+        # Redacted image
+        redacted_label = ttk.Label(middle_panel, text="Redacted", font=("Helvetica", 12, "bold"))
+        redacted_label.grid(row=0, column=1, pady=5)
+        
+        self.redacted_canvas = tk.Canvas(
+            middle_panel,
+            width=400,
+            height=600,
+            bg='white',
+            relief=tk.SUNKEN,
+            borderwidth=2
+        )
+        self.redacted_canvas.grid(row=1, column=1, padx=5, sticky="nsew")
+        
+        middle_panel.grid_rowconfigure(1, weight=1)
+        middle_panel.grid_columnconfigure(0, weight=1)
+        middle_panel.grid_columnconfigure(1, weight=1)
+        
+        # Right panel - Audit & NLP
+        right_panel = ttk.Frame(main_frame, width=350)
+        right_panel.grid(row=0, column=2, sticky="ns", padx=(10, 0))
+        
+        # NLP Explanation
+        nlp_frame = ttk.LabelFrame(right_panel, text="NLP Explanation", padding="10")
+        nlp_frame.pack(fill="both", expand=True, pady=(0, 10))
+        
+        self.nlp_text = scrolledtext.ScrolledText(
+            nlp_frame,
+            height=10,
+            width=40,
+            font=("Helvetica", 10),
+            wrap=tk.WORD
+        )
+        self.nlp_text.pack(fill="both", expand=True)
+        
+        # Risk Assessment
+        risk_frame = ttk.LabelFrame(right_panel, text="Risk Assessment", padding="10")
+        risk_frame.pack(fill="x", pady=(0, 10))
+        
+        self.risk_label = ttk.Label(
+            risk_frame,
+            text="No analysis yet",
+            font=("Helvetica", 10),
+            foreground="#7f8c8d",
+            wraplength=320,
+            justify="left"
+        )
+        self.risk_label.pack(fill="x")
+        
+        # Audit Trail
+        audit_frame = ttk.LabelFrame(right_panel, text="Audit Trail", padding="10")
+        audit_frame.pack(fill="both", expand=True)
+        
+        self.audit_text = scrolledtext.ScrolledText(
+            audit_frame,
+            height=15,
+            width=40,
+            font=("Courier", 8),
+            wrap=tk.WORD
+        )
+        self.audit_text.pack(fill="both", expand=True)
     
-    def create_tooltip(self, widget, text):
-        """Create a tooltip for a widget"""
-        tooltip = ttk.Label(self.root, text=text, background="#ffffe0", 
-                          relief="solid", borderwidth=1, padding=5)
-        tooltip.place_forget()
-        
-        def enter(event):
-            x = widget.winfo_rootx() + widget.winfo_width() // 2
-            y = widget.winfo_rooty() + widget.winfo_height() + 5
-            tooltip.place(x=x, y=y, anchor=tk.N)
-            
-        def leave(event):
-            tooltip.place_forget()
-            
-        widget.bind("<Enter>", enter)
-        widget.bind("<Leave>", leave)
-    
-    def upload_document(self):
-        file_path = filedialog.askopenfilename(
-            title="Select Document",
+    def load_image(self):
+        """Load image from file."""
+        filepath = filedialog.askopenfilename(
+            title="Select Document Image",
             filetypes=[
-                ("Image files", "*.png *.jpg *.jpeg *.bmp *.tiff"),
+                ("Image files", "*.jpg *.jpeg *.png *.bmp *.tiff"),
                 ("All files", "*.*")
             ]
         )
-        if file_path:
-            self.current_image_path = file_path
-            self.display_image(file_path)
-            if self.pii_redactor_ready:
-                self.redact_btn.config(state=tk.NORMAL)
-            self.update_status(f"✓ Document loaded: {os.path.basename(file_path)}")
-            self.audit_log.append(f"📁 Document uploaded: {file_path}")
-            
-            # Add to recent files
-            if file_path in self.recent_files:
-                self.recent_files.remove(file_path)
-            self.recent_files.insert(0, file_path)
-            self.recent_files = self.recent_files[:5]  # Keep only last 5
-            self.update_recent_menu()
-            self.save_settings()
-    
-    def display_image(self, image_path):
+        
+        if not filepath:
+            return
+        
         try:
-            self.original_image_path = image_path  # Store original full-resolution image path separately
-            self.original_image = Image.open(image_path)  # Store original full-resolution image
-            img = self.original_image.copy()  # Keep preview thumbnail for UI display ONLY
-            img.thumbnail((500, 400))
-            img_tk = ImageTk.PhotoImage(img)
-            self.preview_label.config(image=img_tk)
-            self.preview_label.image = img_tk  # Keep reference
+            self.current_image = Image.open(filepath)
+            self.display_image(self.current_image, self.original_canvas)
+            
+            self.is_pdf_mode = False
+            self.current_pdf_path = None
+            self.btn_process.config(state="normal")
+            self.status_label.config(text="Image loaded", foreground="#27ae60")
+            
+            logger.info(f"Loaded image: {filepath}")
+        
         except Exception as e:
-            messagebox.showerror("Error", f"Failed to load image:\n\n{str(e)}")
-            self.update_status("✗ Error loading image")
-
+            messagebox.showerror("Error", f"Failed to load image:\n{e}")
+            logger.error(f"Image load failed: {e}")
     
-    def redact_pii(self):
-        if not self.current_image_path:
-            messagebox.showwarning("Warning", "Please upload a document first.")
+    def load_pdf(self):
+        """Load PDF file."""
+        if not PDF_AVAILABLE:
+            messagebox.showerror(
+                "PDF Not Available",
+                "PDF support not installed.\n\n"
+                "Install with:\n"
+                "pip install pdf2image img2pdf\n\n"
+                "Also install poppler:\n"
+                "Windows: Download from poppler.freedesktop.org\n"
+                "Linux: sudo apt-get install poppler-utils\n"
+                "Mac: brew install poppler"
+            )
             return
         
-        if not self.pii_redactor_ready or not self.pii_redactor:
-            if not self.pii_redactor_ready:
-                messagebox.showinfo(
-                    "Please Wait", 
-                    "PII Redactor is still initializing.\n\n"
-                    "Please wait for the initialization to complete and try again."
+        filepath = filedialog.askopenfilename(
+            title="Select PDF Document",
+            filetypes=[
+                ("PDF files", "*.pdf"),
+                ("All files", "*.*")
+            ]
+        )
+        
+        if not filepath:
+            return
+        
+        try:
+            # Check file size (rough estimate of page count)
+            import os
+            file_size_mb = os.path.getsize(filepath) / (1024 * 1024)
+            
+            if file_size_mb > 50:  # Rough limit
+                response = messagebox.askyesno(
+                    "Large PDF",
+                    f"PDF file is {file_size_mb:.1f}MB.\n"
+                    f"This may take several minutes.\n\n"
+                    f"Continue?"
                 )
-            else:
-                messagebox.showerror(
-                    "PII Redactor Not Available", 
-                    "PII Redactor could not be initialized.\n\n"
-                    "Please check the console output for details."
-                )
+                if not response:
+                    return
+            
+            self.current_pdf_path = filepath
+            self.is_pdf_mode = True
+            self.current_image = None
+            
+            # Show PDF info
+            from pathlib import Path
+            pdf_name = Path(filepath).name
+            
+            # Clear canvases
+            self.original_canvas.delete("all")
+            self.redacted_canvas.delete("all")
+            
+            # Show PDF icon/text
+            self.original_canvas.create_text(
+                200, 300,
+                text=f"📄 PDF Loaded\n\n{pdf_name}\n\nClick 'Redact PII' to process",
+                font=("Helvetica", 14),
+                fill="#2c3e50"
+            )
+            
+            self.btn_process.config(state="normal")
+            self.status_label.config(text="PDF loaded", foreground="#27ae60")
+            
+            logger.info(f"Loaded PDF: {filepath}")
+        
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to load PDF:\n{e}")
+            logger.error(f"PDF load failed: {e}")
+    
+    def process_image(self):
+        """Process image or PDF in background thread."""
+        if self.processing:
             return
         
-        # Check if already processing
-        if self.processing_thread and self.processing_thread.is_alive():
-            messagebox.showinfo("Processing", "PII redaction is already in progress. Please wait.")
+        if not self.current_image and not self.current_pdf_path:
             return
         
-        self.update_status("⏳ Processing PII redaction in background...")
-        self.redact_btn.config(state=tk.DISABLED)
-        self.progress.grid()  # Show progress bar
+        self.processing = True
+        self.btn_process.config(state="disabled")
+        self.btn_load.config(state="disabled")
+        self.btn_load_pdf.config(state="disabled")
         self.progress.start()
         
-        # Start redaction in background thread
-        self.processing_thread = threading.Thread(
-            target=self.redact_pii_background, 
-            args=(self.current_image_path,), 
-            daemon=True
-        )
-        self.processing_thread.start()
+        if self.is_pdf_mode:
+            self.status_label.config(text="Processing PDF...", foreground="#e67e22")
+        else:
+            self.status_label.config(text="Processing...", foreground="#e67e22")
+        
+        # Process in thread
+        thread = threading.Thread(target=self._process_worker, daemon=True)
+        thread.start()
     
-    def redact_pii_background(self, image_path):
-        """Perform PII redaction in background thread."""
+    def _process_worker(self):
+        """Background processing worker."""
         try:
-            # ALWAYS use self.current_image_path (original file path)
-            # Never use any PIL Image object from preview
-            redacted_image = self.pii_redactor.process_document(self.current_image_path)
-            
-            # Get audit data from the redactor
-            audit_data = self.pii_redactor.generate_audit_log()
-            
-            # Send results back to main thread
-            self.result_queue.put(("redaction_success", (redacted_image, audit_data)))
-            
+            if self.is_pdf_mode:
+                # Process PDF
+                output_path, audit = PDF_REDACTOR.redact_pdf(
+                    self.current_pdf_path,
+                    progress_callback=self._pdf_progress_callback
+                )
+                
+                # Update UI in main thread
+                self.after(0, self._pdf_process_complete, output_path, audit)
+            else:
+                # Process image
+                redacted, audit = REDACTOR.redact_image(
+                    self.current_image,
+                    filename="document.jpg",
+                    generate_audit=True
+                )
+                
+                # Update UI in main thread
+                self.after(0, self._process_complete, redacted, audit)
+        
         except Exception as e:
-            import traceback
-            error_details = traceback.format_exc()
-            print(f"Redaction error:\n{error_details}")
-            self.result_queue.put(("redaction_error", str(e)))
+            self.after(0, self._process_error, str(e))
     
-    def display_redacted_image(self):
-        if self.redacted_image:
-            # Load the FULL redacted image from PIIRedactor
-            img = self.redacted_image.copy()
-            # THEN thumbnail it for display only
-            img.thumbnail((500, 400))
-            img_tk = ImageTk.PhotoImage(img)
-            self.preview_label.config(image=img_tk)
-            self.preview_label.image = img_tk
-            # Ensure saved image is full resolution - it is, since self.redacted_image is full
+    def _pdf_progress_callback(self, page: int, total: int, status: str):
+        """Callback for PDF processing progress."""
+        def update_status():
+            if total > 0:
+                self.status_label.config(
+                    text=f"Processing page {page}/{total}...",
+                    foreground="#e67e22"
+                )
+        
+        self.after(0, update_status)
+    
+    def _process_complete(self, redacted: Image.Image, audit: dict):
+        """Handle processing completion."""
+        self.redacted_image = redacted
+        self.audit_data = audit
+        
+        # Display redacted image
+        self.display_image(redacted, self.redacted_canvas)
+        
+        # Update statistics
+        self.update_statistics(audit['statistics'])
+        
+        # Update NLP explanation
+        self.nlp_text.delete(1.0, tk.END)
+        self.nlp_text.insert(1.0, audit['nlp_explanation'])
+        
+        # Update risk assessment
+        risk_text = audit['risk_assessment']
+        risk_color = self._get_risk_color(risk_text)
+        self.risk_label.config(text=risk_text, foreground=risk_color)
+        
+        # Update audit trail
+        self.update_audit_trail(audit)
+        
+        # Re-enable buttons
+        self.processing = False
+        self.progress.stop()
+        self.btn_process.config(state="normal")
+        self.btn_load.config(state="normal")
+        self.btn_load_pdf.config(state="normal")
+        self.btn_save.config(state="normal")
+        self.status_label.config(text="Complete", foreground="#27ae60")
+        
+        logger.info("Processing complete")
+    
+    def _pdf_process_complete(self, output_path: str, audit: dict):
+        """Handle PDF processing completion."""
+        self.audit_data = audit
+        self.redacted_image = None  # PDF, not image
+        
+        # Show success message on canvas
+        self.redacted_canvas.delete("all")
+        self.redacted_canvas.create_text(
+            200, 250,
+            text=f"✅ PDF Redacted Successfully!\n\n"
+                 f"Pages: {audit['total_pages']}\n"
+                 f"Detections: {audit['total_detections']}\n"
+                 f"Time: {audit['processing_time']}s\n\n"
+                 f"Saved to:\n{Path(output_path).name}",
+            font=("Helvetica", 12),
+            fill="#27ae60",
+            width=350
+        )
+        
+        # Update statistics
+        stats = audit['statistics']
+        self.stats_text.delete(1.0, tk.END)
+        text = f"PDF Statistics:\n\n"
+        text += f"Total Pages: {stats['total_pages']}\n"
+        text += f"Total Detections: {stats['total_detections']}\n"
+        text += f"Pages with PII: {stats['pages_with_pii']}\n"
+        text += f"Pages without PII: {stats['pages_without_pii']}\n\n"
+        text += f"By Risk:\n"
+        for risk, count in stats['by_risk'].items():
+            text += f"  {risk}: {count}\n"
+        text += f"\nBy Type:\n"
+        for type_, count in stats['by_type'].items():
+            text += f"  {type_}: {count}\n"
+        
+        if stats['high_risk_pages']:
+            text += f"\nHigh-Risk Pages:\n"
+            text += f"  {', '.join(map(str, stats['high_risk_pages']))}\n"
+        
+        self.stats_text.insert(1.0, text)
+        
+        # Update NLP explanation
+        self.nlp_text.delete(1.0, tk.END)
+        explanation = f"Processed {stats['total_pages']}-page PDF document. "
+        explanation += f"Detected and redacted {stats['total_detections']} PII items across {stats['pages_with_pii']} pages. "
+        explanation += f"Processing completed in {audit['processing_time']} seconds. "
+        explanation += f"Redacted PDF is ready for download."
+        self.nlp_text.insert(1.0, explanation)
+        
+        # Update risk assessment
+        if stats['by_risk']['HIGH'] >= 10:
+            risk_text = "CRITICAL - Multiple high-risk PII across document"
+            risk_color = "#e74c3c"
+        elif stats['by_risk']['HIGH'] >= 5:
+            risk_text = "HIGH - Significant PII detected"
+            risk_color = "#e67e22"
+        elif stats['total_detections'] >= 10:
+            risk_text = "MODERATE - Multiple PII items"
+            risk_color = "#f39c12"
+        else:
+            risk_text = "LOW - Minimal PII detected"
+            risk_color = "#27ae60"
+        
+        self.risk_label.config(text=risk_text, foreground=risk_color)
+        
+        # Update audit trail
+        self.audit_text.delete(1.0, tk.END)
+        text = f"PDF Audit Trail\n\n"
+        text += f"Filename: {audit['filename']}\n"
+        text += f"Timestamp: {audit['timestamp']}\n"
+        text += f"Processing Time: {audit['processing_time']}s\n"
+        text += f"DPI: {audit['dpi']}\n\n"
+        text += f"--- Pages Summary ---\n"
+        for page in audit['pages'][:10]:
+            text += f"Page {page['page_number']}: {page['detections']} detections\n"
+        
+        if len(audit['pages']) > 10:
+            text += f"\n... and {len(audit['pages']) - 10} more pages\n"
+        
+        self.audit_text.insert(1.0, text)
+        
+        # Re-enable buttons
+        self.processing = False
+        self.progress.stop()
+        self.btn_process.config(state="normal")
+        self.btn_load.config(state="normal")
+        self.btn_load_pdf.config(state="normal")
+        self.btn_save.config(state="normal")
+        self.status_label.config(text="PDF Complete", foreground="#27ae60")
+        
+        # Show download option
+        messagebox.showinfo(
+            "PDF Redacted",
+            f"PDF successfully redacted!\n\n"
+            f"Output: {Path(output_path).name}\n"
+            f"Location: {Path(output_path).parent}\n\n"
+            f"Click 'Save Result' to choose a different location."
+        )
+        
+        # Store output path for saving
+        self.current_pdf_output = output_path
+        
+        logger.info(f"PDF processing complete: {output_path}")
+    
+    def _process_error(self, error_msg: str):
+        """Handle processing error."""
+        self.processing = False
+        self.progress.stop()
+        self.btn_process.config(state="normal")
+        self.btn_load.config(state="normal")
+        self.btn_load_pdf.config(state="normal")
+        self.status_label.config(text="Error", foreground="#e74c3c")
+        
+        messagebox.showerror("Processing Error", f"Failed to process:\n{error_msg}")
+        logger.error(f"Processing failed: {error_msg}")
+    
+    def display_image(self, image: Image.Image, canvas: tk.Canvas):
+        """Display image on canvas with aspect ratio."""
+        canvas_width = canvas.winfo_width() if canvas.winfo_width() > 1 else 400
+        canvas_height = canvas.winfo_height() if canvas.winfo_height() > 1 else 600
+        
+        # Resize to fit
+        img_copy = image.copy()
+        img_copy.thumbnail((canvas_width - 20, canvas_height - 20), Image.LANCZOS)
+        
+        # Convert to PhotoImage
+        photo = ImageTk.PhotoImage(img_copy)
+        
+        # Clear canvas
+        canvas.delete("all")
+        
+        # Center image
+        x = (canvas_width - img_copy.width) // 2
+        y = (canvas_height - img_copy.height) // 2
+        
+        canvas.create_image(x, y, anchor=tk.NW, image=photo)
+        canvas.image = photo  # Keep reference
+    
+    def update_statistics(self, stats: dict):
+        """Update statistics display."""
+        self.stats_text.delete(1.0, tk.END)
+        
+        text = f"Total Detections: {stats['total_detections']}\n\n"
+        
+        text += "By Risk:\n"
+        for risk, count in stats['by_risk'].items():
+            text += f"  {risk}: {count}\n"
+        
+        text += "\nBy Type:\n"
+        for type_, count in stats['by_type'].items():
+            text += f"  {type_}: {count}\n"
+        
+        text += "\nTop Entities:\n"
+        for entity, count in list(stats['entities'].items())[:5]:
+            text += f"  {entity}: {count}\n"
+        
+        self.stats_text.insert(1.0, text)
+    
+    def update_audit_trail(self, audit: dict):
+        """Update audit trail display."""
+        self.audit_text.delete(1.0, tk.END)
+        
+        text = f"Timestamp: {audit['timestamp']}\n"
+        text += f"Filename: {audit['filename']}\n"
+        text += f"Processing Time: {audit['processing_time']}s\n"
+        text += f"Image Size: {audit['image_size']}\n\n"
+        
+        text += "--- Detections ---\n"
+        for i, det in enumerate(audit['detections'][:10], 1):
+            text += f"{i}. {det['entity']} ({det['risk']})\n"
+            text += f"   Source: {det.get('source', 'N/A')}\n"
+            text += f"   Confidence: {det['confidence']:.2f}\n\n"
+        
+        if len(audit['detections']) > 10:
+            text += f"... and {len(audit['detections']) - 10} more\n"
+        
+        self.audit_text.insert(1.0, text)
+    
+    def _get_risk_color(self, risk_text: str) -> str:
+        """Get color for risk level."""
+        if "CRITICAL" in risk_text:
+            return "#e74c3c"
+        elif "HIGH" in risk_text:
+            return "#e67e22"
+        elif "MODERATE" in risk_text:
+            return "#f39c12"
+        else:
+            return "#27ae60"
     
     def save_redacted(self):
-        if not self.redacted_image:
-            messagebox.showwarning("Warning", "No redacted image to save.")
+        """Save redacted image or PDF."""
+        # Check if PDF mode
+        if self.is_pdf_mode and hasattr(self, 'current_pdf_output'):
+            # Copy PDF to chosen location
+            import shutil
+            
+            filepath = filedialog.asksaveasfilename(
+                title="Save Redacted PDF",
+                defaultextension=".pdf",
+                filetypes=[
+                    ("PDF", "*.pdf"),
+                    ("All files", "*.*")
+                ]
+            )
+            
+            if filepath:
+                try:
+                    shutil.copy2(self.current_pdf_output, filepath)
+                    messagebox.showinfo("Saved", f"PDF saved to:\n{filepath}")
+                    logger.info(f"Saved redacted PDF: {filepath}")
+                except Exception as e:
+                    messagebox.showerror("Error", f"Failed to save PDF:\n{e}")
             return
         
-        save_path = filedialog.asksaveasfilename(
-            title="Save Redacted Document",
-            defaultextension=".png",
+        # Image mode
+        if not self.redacted_image:
+            messagebox.showwarning("No Image", "No redacted image to save")
+            return
+        
+        filepath = filedialog.asksaveasfilename(
+            title="Save Redacted Image",
+            defaultextension=".jpg",
             filetypes=[
-                ("PNG files", "*.png"),
-                ("JPEG files", "*.jpg"),
+                ("JPEG", "*.jpg"),
+                ("PNG", "*.png"),
                 ("All files", "*.*")
             ]
         )
-        if save_path:
+        
+        if filepath:
             try:
-                self.redacted_image.save(save_path)
-                self.update_status(f"✓ Redacted document saved: {os.path.basename(save_path)}")
-                self.audit_log.append(f"💾 Redacted document saved: {save_path}")
-                messagebox.showinfo("Success", "Redacted document saved successfully!")
+                self.redacted_image.save(filepath)
+                messagebox.showinfo("Saved", f"Image saved to:\n{filepath}")
+                logger.info(f"Saved redacted image: {filepath}")
             except Exception as e:
-                messagebox.showerror("Error", f"Failed to save image:\n\n{str(e)}")
-                self.update_status("✗ Error saving document")
+                messagebox.showerror("Error", f"Failed to save:\n{e}")
     
-    def view_log(self):
-        log_window = tk.Toplevel(self.root)
-        log_window.title("Audit Trail - Shyam & Co")
-        log_window.geometry("600x450")
-        self.center_window(log_window, 600, 450)
-        
-        # Create frame for text and scrollbar
-        frame = ttk.Frame(log_window, padding=10)
-        frame.pack(fill=tk.BOTH, expand=True)
-        
-        log_text = tk.Text(frame, wrap=tk.WORD, padx=10, pady=10, font=("Consolas", 10))
-        scrollbar = ttk.Scrollbar(frame, orient=tk.VERTICAL, command=log_text.yview)
-        log_text.config(yscrollcommand=scrollbar.set)
-        
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        log_text.pack(fill=tk.BOTH, expand=True)
-        
-        log_text.insert(tk.END, "📜 AUDIT TRAIL\n")
-        log_text.insert(tk.END, "=" * 60 + "\n\n")
-        
-        for entry in self.audit_log:
-            log_text.insert(tk.END, entry + "\n\n")
-        
-        if not self.audit_log:
-            log_text.insert(tk.END, "No audit entries yet. Upload and redact a document to begin.\n")
-        
-        log_text.config(state=tk.DISABLED)
-        
-        # Close button
-        close_btn = ttk.Button(frame, text="Close", command=log_window.destroy, padding=5)
-        close_btn.pack(pady=(10, 0))
-    
-    def view_explanations(self):
-        """Show detailed explanations for detected PII."""
-        if not self.current_audit_data:
-            messagebox.showinfo("No Explanations", "No PII explanations available. Please redact a document first.")
-            return
-        
-        explain_window = tk.Toplevel(self.root)
-        explain_window.title("PII Detection Explanations - Shyam & Co")
-        self.center_window(explain_window, 750, 550)
-        
-        # Create main frame with scrollbar
-        main_frame = ttk.Frame(explain_window, padding=10)
-        main_frame.pack(fill=tk.BOTH, expand=True)
-        
-        # Create scrollable text widget
-        text_frame = ttk.Frame(main_frame)
-        text_frame.pack(fill=tk.BOTH, expand=True)
-        
-        explain_text = tk.Text(text_frame, wrap=tk.WORD, padx=15, pady=15, font=("Consolas", 10))
-        scrollbar = ttk.Scrollbar(text_frame, orient=tk.VERTICAL, command=explain_text.yview)
-        explain_text.config(yscrollcommand=scrollbar.set)
-        
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        explain_text.pack(fill=tk.BOTH, expand=True)
-        
-        # Build explanation content
-        content = []
-        content.append("🔍 PII DETECTION EXPLANATIONS\n")
-        content.append("=" * 70 + "\n\n")
-        
-        content.append(f"📄 Document: {self.current_audit_data.get('original_filename', 'Unknown')}\n")
-        content.append(f"⏰ Processed: {self.current_audit_data.get('timestamp', 'Unknown')}\n")
-        content.append(f"🏢 Company Watermark: {self.current_audit_data.get('company_watermark', 'Privara & Co')}\n")
-        content.append(f"🔒 Redaction Method: {self.current_audit_data.get('redaction_method', 'Watermarked Black Box')}\n\n")
-        
-        text_pii = self.current_audit_data.get('text_pii_count', 0)
-        visual_pii = self.current_audit_data.get('visual_pii_count', 0)
-        total = self.current_audit_data.get('total_pii_detected', text_pii + visual_pii)
-        
-        content.append(f"📊 Summary Statistics:\n")
-        content.append(f"   • Total PII Detected: {total}\n")
-        content.append(f"   • Text-based PII: {text_pii}\n")
-        content.append(f"   • Visual PII: {visual_pii}\n\n")
-        
-        pii_types = self.current_audit_data.get('detected_pii_types', [])
-        if pii_types:
-            content.append(f"🏷️  Detected PII Types:\n")
-            for pii_type in pii_types:
-                content.append(f"   • {pii_type}\n")
-            content.append("\n")
-        
-        content.append("─" * 70 + "\n\n")
-        content.append("💡 Privacy Protection Features:\n\n")
-        content.append(f"   • Differential Privacy (ε): {self.current_audit_data.get('epsilon_used', 'N/A')}\n")
-        content.append(f"   • Data Region: {self.current_audit_data.get('data_region', 'N/A')}\n")
-        content.append(f"   • Watermark Applied: Yes (Privara & Co)\n")
-        content.append(f"   • Full Opacity Redaction: Yes\n\n")
-        
-        # Insert content
-        explain_text.insert(tk.END, "".join(content))
-        explain_text.config(state=tk.DISABLED)
-        
-        # Add close button
-        close_btn = ttk.Button(main_frame, text="Close", command=explain_window.destroy, padding=8)
-        close_btn.pack(pady=(10, 0))
-    
-    def show_about(self):
-        about_window = tk.Toplevel(self.root)
-        about_window.title("About PII Redactor")
-        self.center_window(about_window, 400, 250)
-        
-        about_frame = ttk.Frame(about_window, padding=20)
-        about_frame.pack(fill=tk.BOTH, expand=True)
-        
-        ttk.Label(about_frame, text="PII Redactor MVP", font=("Arial", 16, "bold")).pack(pady=10)
-        ttk.Label(about_frame, text="Version 1.0.0", font=("Arial", 10)).pack()
-        ttk.Label(about_frame, text="Powered by Shyam & Co", font=("Arial", 10, "italic")).pack(pady=5)
-        ttk.Label(about_frame, text="\nPrivacy-First Document Redaction\nwith AI-Powered Detection", 
-                 justify=tk.CENTER).pack(pady=10)
-        ttk.Label(about_frame, text="© 2025 Shyam & Co. All rights reserved.", 
-                 font=("Arial", 8), foreground="gray").pack(pady=10)
-        
-        ttk.Button(about_frame, text="Close", command=about_window.destroy, padding=5).pack(pady=10)
-    
-    def show_documentation(self):
-        messagebox.showinfo(
-            "Documentation",
-            "PII Redactor MVP - Quick Guide\n\n"
-            "1. Upload Document: Click 'Upload Document' to select an image\n"
-            "2. Redact PII: Click 'Redact PII' to process the document\n"
-            "3. Save: Click 'Save Redacted' to export the result\n"
-            "4. View Explanations: See detailed detection information\n"
-            "5. Audit Log: Track all operations performed\n\n"
-            "Supported Formats: PNG, JPG, JPEG, BMP, TIFF\n\n"
-            "For support, contact: sundxrr@gmail.com"
-        )
-    
-    def update_status(self, message):
-        """Update status bar with proper error handling."""
-        try:
-            if hasattr(self, 'status_var') and self.status_var:
-                self.status_var.set(message)
-        except Exception:
-            pass
-    
-    def center_window(self, window, width, height):
-        """Center a window on the screen"""
-        screen_width = window.winfo_screenwidth()
-        screen_height = window.winfo_screenheight()
-        
-        x = (screen_width // 2) - (width // 2)
-        y = (screen_height // 2) - (height // 2)
-        
-        window.geometry(f"{width}x{height}+{x}+{y}")
-    
-    def update_recent_menu(self):
-        self.recent_menu.delete(0, tk.END)
-        for file_path in self.recent_files:
-            display_name = os.path.basename(file_path)
-            self.recent_menu.add_command(
-                label=display_name, 
-                command=lambda path=file_path: self.open_recent_file(path)
-            )
-        if not self.recent_files:
-            self.recent_menu.add_command(label="(No recent files)", state=tk.DISABLED)
-    
-    def open_recent_file(self, file_path):
-        """Open a file from the recent files list"""
-        if os.path.exists(file_path):
-            self.current_image_path = file_path
-            self.display_image(file_path)
-            if self.pii_redactor_ready:
-                self.redact_btn.config(state=tk.NORMAL)
-            self.update_status(f"✓ Document loaded: {os.path.basename(file_path)}")
-            self.audit_log.append(f"📁 Document opened from recent: {file_path}")
-            
-            # Move to top of recent list
-            if file_path in self.recent_files:
-                self.recent_files.remove(file_path)
-            self.recent_files.insert(0, file_path)
-            self.update_recent_menu()
-            self.save_settings()
+    def view_audit_logs(self):
+        """Open audit logs directory."""
+        audit_dir = Path("output/audit_logs")
+        if audit_dir.exists():
+            os.startfile(audit_dir) if os.name == 'nt' else os.system(f'open "{audit_dir}"')
         else:
-            messagebox.showerror("File Not Found", f"The file was not found:\n\n{file_path}")
-            self.recent_files.remove(file_path)
-            self.update_recent_menu()
-            self.save_settings()
+            messagebox.showinfo("No Logs", "No audit logs found yet")
     
-    def clear_recent_files(self):
-        """Clear the recent files list"""
-        self.recent_files = []
-        self.update_recent_menu()
-        self.save_settings()
-        messagebox.showinfo("Cleared", "Recent files list cleared.")
-    
-    def load_settings(self):
-        """Load application settings"""
-        self.recent_files = []  # Initialize first
-        try:
-            if os.path.exists(self.settings_file):
-                with open(self.settings_file, "r") as f:
-                    settings = json.load(f)
-                    self.recent_files = settings.get("recent_files", [])
-        except Exception as e:
-            print(f"Could not load settings: {e}")
-            self.recent_files = []
-    
-    def save_settings(self):
-        """Save application settings"""
-        try:
-            if not hasattr(self, 'recent_files'):
-                self.recent_files = []
-            
-            settings = {
-                "recent_files": self.recent_files
-            }
-            
-            # Ensure directory exists
-            os.makedirs(os.path.dirname(self.settings_file), exist_ok=True)
-            
-            with open(self.settings_file, "w") as f:
-                json.dump(settings, f, indent=2)
-        except Exception as e:
-            print(f"Could not save settings: {e}")
-    
-    def __del__(self):
-        try:
-            self.save_settings()
-        except:
-            pass  # Ignore errors during cleanup
+    def batch_process(self):
+        """Batch process multiple images."""
+        messagebox.showinfo("Coming Soon", "Batch processing will be available in the next update")
+
+
+
+def main():
+    """Launch PII Redactor UI."""
+    app = PIIRedactorUI()
+    app.mainloop()
+
 
 
 if __name__ == "__main__":
-    root = tk.Tk()
-    app = PIIRedactorGUI(root)
-    root.mainloop()
+    main()
